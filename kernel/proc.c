@@ -133,6 +133,23 @@ found:
   return p;
 }
 
+// Count number of used (not UNUSED) processes
+uint64
+countusedproc(void)
+{
+  uint64 ret = 0;
+  struct proc *p;
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if (p->state != UNUSED)
+        ret++;
+    release(&p->lock);
+  }
+
+  return ret;
+}
+
 // free a proc structure and the data hanging from it,
 // including user pages.
 // p->lock must be held.
