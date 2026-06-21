@@ -1,0 +1,23 @@
+[vmprint]
+  The output:
+  page table 0x0000000087f6e000
+  ..0: pte 0x0000000021fda801 pa 0x0000000087f6a000
+  .. ..0: pte 0x0000000021fda401 pa 0x0000000087f69000
+  .. .. ..0: pte 0x0000000021fdac1f pa 0x0000000087f6b000
+  .. .. ..1: pte 0x0000000021fda00f pa 0x0000000087f68000
+  .. .. ..2: pte 0x0000000021fd9c1f pa 0x0000000087f67000
+  ..255: pte 0x0000000021fdb401 pa 0x0000000087f6d000
+  .. ..511: pte 0x0000000021fdb001 pa 0x0000000087f6c000
+  .. .. ..510: pte 0x0000000021fdd807 pa 0x0000000087f76000
+  .. .. ..511: pte 0x0000000020001c0b pa 0x0000000080007000
+
+  Here index for each level in page table tree that coresspond to valid PTEs gets printed. The virtual address of the page is contiguous combination of these indices of 9 bits (0 to 511) with all other extra and offset bits zero.
+  The first three leaf pages have 0x0, 0x1000, 0x2000 as the page addresses. The page at VA 0x1000 has its 5th bit clear (unset) which means, pte(0x1000) & PTE_U is 0. This means user instructions are not allowed to access. This means it must be the gaurd page.
+  So, the picture becomes clear.
+    - page 0 (VA 0x0) contains user processes instructions loaded from proghdr's of elf binary _init.
+    - page 1 is a gaurd page whose user access is removed via uvmclear call.
+    - page 2 is the user stack that contains argc, argv strings and their references
+
+  The other two pages with PTEs near MAXVA (2 pages below 256GB) contain trampoline and trapframe.
+    - page 511 (0x3ffffff000) is mapped to trampoline
+    - page 510 (0x3fffffe000) is mapped to trapframe
