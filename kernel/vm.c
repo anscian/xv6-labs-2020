@@ -270,9 +270,8 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 }
 
 // Recursively free page-table pages.
-// All leaf mappings must already have been removed.
 void
-freewalk(pagetable_t pagetable)
+_freewalk(pagetable_t pagetable, int handle_leafs)
 {
   // there are 2^9 = 512 PTEs in a page table.
   for(int i = 0; i < 512; i++){
@@ -280,13 +279,32 @@ freewalk(pagetable_t pagetable)
     if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
       // this PTE points to a lower-level page table.
       uint64 child = PTE2PA(pte);
-      freewalk((pagetable_t)child);
+      _freewalk((pagetable_t)child, handle_leafs);
       pagetable[i] = 0;
     } else if(pte & PTE_V){
-      panic("freewalk: leaf");
+      if (handle_leafs)
+        panic("freewalk: leaf");
+      else
+        pagetable[i] = 0;
     }
   }
   kfree((void*)pagetable);
+}
+//  All leaf mappings must already have been removed.
+void
+freewalk(pagetable_t pagetable)
+{
+  _freewalk(pagetable, 1);
+}
+//  Free copy of a existing pagetable, the physical
+//  addresses of each virtual addresses in copy
+//  should'nt be freed as they are still refereced
+//  from original pagetable. Used to free kernel pagetable
+//  copies in each process
+void
+freeunmap(pagetable_t pagetable)
+{
+  _freewalk(pagetable, 0);
 }
 
 // Free user memory pages,
@@ -466,4 +484,51 @@ vmprint(pagetable_t pagetable)
 {
   printf("page table %p\n", pagetable);
   _vmprint_lvl(pagetable, 2);
+}
+
+pagetable_t
+copy_pagetable(pagetable_t old)
+{
+  pagetable_t new;
+  new = (pagetable_t) kalloc();
+  if (new == 0)
+    return 0;
+  memset(new, 0, PGSIZE);
+
+  int i;
+  pte_t *pte;
+  uint64 pa;
+  uint flags;
+
+  for (i = 0; i < 512; i++) {
+    pte = old + i;
+    if ((*pte & PTE_V) == 0)
+      continue;
+    flags = PTE_FLAGS(*pte);
+    if (flags & ~PTE_V) {
+      // a leaf entry
+      new[i] = *pte;
+    }
+    else {
+      pa = (uint64) copy_pagetable((pagetable_t) PTE2PA(*pte));
+      if (pa == 0)
+        goto error;
+      new[i] = PA2PTE(pa) | flags;
+    }
+  }
+
+  return new;
+
+error:
+  freeunmap(new);
+  return 0;
+}
+
+pagetable_t
+copy_kvm(void)
+{
+  pagetable_t pagetable;
+  if ((pagetable = copy_pagetable(kernel_pagetable)) == 0)
+    return 0;
+  return pagetable;
 }

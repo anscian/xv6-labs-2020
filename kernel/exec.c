@@ -117,7 +117,19 @@ exec(char *path, char **argv)
   proc_freepagetable(oldpagetable, oldsz);
 
   if (p->pid == 1)
-      vmprint(p->pagetable);
+    vmprint(p->pagetable);
+  if (p->pid == 1) {
+    printf("\n****************MAKING A COPY FOR CHECKING***************\n");
+    pagetable_t pgtable = copy_pagetable(p->pagetable);
+    vmprint(pgtable);
+    printf("\n****************FREEING THIS NEW PAGETABLE***************\n");
+    freeunmap(pgtable);
+    printf("The pagetable copy lvl 2 PD must now be filled with 1s\n");
+    printf("Except the first 64 bits->address to next free page\n");
+    for (int i = 0; i < 512; i++) {
+      printf("%d\t: %p\n", i, (void *) pgtable[i]);
+    }
+  }
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:
