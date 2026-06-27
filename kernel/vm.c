@@ -486,34 +486,50 @@ vmprint(pagetable_t pagetable)
   _vmprint_lvl(pagetable, 2);
 }
 
+// Make a copy of given pagetable with npages from va
+// Only allocates page directories if needed
+// Pass new = 0 for creating completely new pagetable
+// Pass npages = 0 to copy the entire pagetable from va
+// Provide additional perms and remove some perms for
+// this block of va's that are being copied
 pagetable_t
-copy_pagetable(pagetable_t old)
+_copy_pagetable(pagetable_t old, pagetable_t new, uint64 va, uint64 npages, uint64 inc_perms, uint64 exc_perms)
 {
-  pagetable_t new;
-  new = (pagetable_t) kalloc();
-  if (new == 0)
-    return 0;
-  memset(new, 0, PGSIZE);
+  if (new == 0) {
+    new = (pagetable_t) kalloc();
+    if (new == 0)
+      return 0;
+    memset(new, 0, PGSIZE);
+  }
 
-  int i;
   pte_t *pte;
-  uint64 pa;
+  uint64 pa, idx_start, idx_end, lvl;
   uint flags;
 
-  for (i = 0; i < 512; i++) {
-    pte = old + i;
+  // utilize offset bits in va to store PD level information
+  // for recursion to be simple
+  lvl = va % PGSIZE;
+  lvl = 2 - lvl;
+  idx_start = PX(lvl, va);
+  if (npages)
+    idx_end = PX(lvl, va + (npages - 1)*PGSIZE);
+  else
+    idx_end = 511;
+
+  for (; idx_start <= idx_end; idx_start++) {
+    pte = old + idx_start;
     if ((*pte & PTE_V) == 0)
       continue;
     flags = PTE_FLAGS(*pte);
     if (flags & ~PTE_V) {
       // a leaf entry
-      new[i] = *pte;
+      new[idx_start] = (*pte | inc_perms) & ~exc_perms;
     }
     else {
-      pa = (uint64) copy_pagetable((pagetable_t) PTE2PA(*pte));
+      pa = (uint64) _copy_pagetable((pagetable_t) PTE2PA(*pte), (pagetable_t) PTE2PA(new[idx_start]), va + 1, npages, inc_perms, exc_perms);
       if (pa == 0)
         goto error;
-      new[i] = PA2PTE(pa) | flags;
+      new[idx_start] = PA2PTE(pa) | flags;
     }
   }
 
@@ -523,12 +539,26 @@ error:
   freeunmap(new);
   return 0;
 }
+// va and sz may not be page aligned
+pagetable_t
+copy_pagetable(pagetable_t old, pagetable_t new, uint64 va, uint64 sz, uint64 inc_perms, uint64 exc_perms)
+{
+  uint64 va0, va1;
+
+  va0 = PGROUNDDOWN(va);
+  if (sz)
+    va1 = (PGROUNDDOWN(va + sz - 1) - va0 + 1)/PGSIZE;
+  else
+    va1 = 0;
+
+  return _copy_pagetable(old, new, va0, va1, inc_perms, exc_perms);
+}
 
 pagetable_t
 copy_kvm(void)
 {
   pagetable_t pagetable;
-  if ((pagetable = copy_pagetable(kernel_pagetable)) == 0)
+  if ((pagetable = copy_pagetable(kernel_pagetable, 0, 0, 0, 0, 0)) == 0)
     return 0;
   return pagetable;
 }

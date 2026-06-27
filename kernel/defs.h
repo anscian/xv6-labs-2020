@@ -179,7 +179,7 @@ int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 void            vmprint(pagetable_t);
-pagetable_t     copy_pagetable(pagetable_t);
+pagetable_t     copy_pagetable(pagetable_t, pagetable_t, uint64, uint64, uint64, uint64);
 pagetable_t     copy_kvm(void);
 void            freeunmap(pagetable_t);
 
