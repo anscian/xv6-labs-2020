@@ -535,7 +535,7 @@ _copy_pagetable(pagetable_t old, pagetable_t new, uint64 va, uint64 npages, uint
 
   return new;
 
-error:
+ error:
   freeunmap(new);
   return 0;
 }
@@ -554,11 +554,32 @@ copy_pagetable(pagetable_t old, pagetable_t new, uint64 va, uint64 sz, uint64 in
   return _copy_pagetable(old, new, va0, va1, inc_perms, exc_perms);
 }
 
+// Fresh copy of a pagetable
+pagetable_t
+new_copy_pagetable(pagetable_t pagetable)
+{
+  pagetable_t cpy;
+  if ((cpy = copy_pagetable(pagetable, 0, 0, 0, 0, 0)) == 0)
+    return 0;
+  return cpy;
+}
+
+// Copy the kernel_pagetable for user processes
 pagetable_t
 copy_kvm(void)
 {
-  pagetable_t pagetable;
-  if ((pagetable = copy_pagetable(kernel_pagetable, 0, 0, 0, 0, 0)) == 0)
+  return new_copy_pagetable(kernel_pagetable);
+}
+
+// Copy user pagetable entries in proc's kernel pagetable
+// Always copy under PLIC limit
+// Return 0 on success and -1 on failure
+int
+copy_uvm_to_kvm(pagetable_t pagetable, pagetable_t kernel_pagetable, uint64 va, uint64 sz)
+{
+  if (PGROUNDUP(va + sz) > PLIC)
+    sz = PLIC - va;
+  if (copy_pagetable(pagetable, kernel_pagetable, va, sz, 0, PTE_U) == kernel_pagetable)
     return 0;
-  return pagetable;
+  return -1;
 }

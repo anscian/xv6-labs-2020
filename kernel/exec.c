@@ -120,7 +120,7 @@ exec(char *path, char **argv)
     vmprint(p->pagetable);
   if (p->pid == 1) {
     printf("\n****************MAKING A COPY FOR CHECKING***************\n");
-    pagetable_t pgtable = copy_pagetable(p->pagetable, 0, 0, 0, 0, 0);
+    pagetable_t pgtable = new_copy_pagetable(p->pagetable);
     vmprint(pgtable);
     printf("\n****************FREEING THIS NEW PAGETABLE***************\n");
     freeunmap(pgtable);
