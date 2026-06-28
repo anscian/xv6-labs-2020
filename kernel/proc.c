@@ -232,6 +232,10 @@ userinit(void)
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
+  // add user pagetable mappings into kernel pagetable copy
+  if (copy_uvm_to_kvm(p->pagetable, p->kernel_pagetable, 0, p->sz) != 0)
+    panic("userinit copy_uvm_to_kvm");
+
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer

@@ -543,15 +543,15 @@ _copy_pagetable(pagetable_t old, pagetable_t new, uint64 va, uint64 npages, uint
 pagetable_t
 copy_pagetable(pagetable_t old, pagetable_t new, uint64 va, uint64 sz, uint64 inc_perms, uint64 exc_perms)
 {
-  uint64 va0, va1;
+  uint64 va0, npages;
 
   va0 = PGROUNDDOWN(va);
   if (sz)
-    va1 = (PGROUNDDOWN(va + sz - 1) - va0 + 1)/PGSIZE;
+    npages = (PGROUNDDOWN(va + sz - 1) - va0)/PGSIZE + 1;
   else
-    va1 = 0;
+    npages = 0;
 
-  return _copy_pagetable(old, new, va0, va1, inc_perms, exc_perms);
+  return _copy_pagetable(old, new, va0, npages, inc_perms, exc_perms);
 }
 
 // Fresh copy of a pagetable
