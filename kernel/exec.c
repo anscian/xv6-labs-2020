@@ -19,6 +19,7 @@ exec(char *path, char **argv)
   struct inode *ip;
   struct proghdr ph;
   pagetable_t pagetable = 0, oldpagetable;
+  pagetable_t kernel_pagetable = 0, old_kernel_pagetable;
   struct proc *p = myproc();
 
   begin_op();
@@ -36,6 +37,9 @@ exec(char *path, char **argv)
     goto bad;
 
   if((pagetable = proc_pagetable(p)) == 0)
+    goto bad;
+
+  if ((kernel_pagetable = copy_kvm()) == 0)
     goto bad;
 
   // Load program into memory.
@@ -75,6 +79,10 @@ exec(char *path, char **argv)
   sp = sz;
   stackbase = sp - PGSIZE;
 
+  // Copy user mappings from pagetable to kernel_pagetable
+  if (copy_uvm_to_kvm(pagetable, kernel_pagetable, 0, sz) != 0)
+    goto bad;
+
   // Push argument strings, prepare rest of stack in ustack.
   for(argc = 0; argv[argc]; argc++) {
     if(argc >= MAXARG)
@@ -111,10 +119,15 @@ exec(char *path, char **argv)
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
+  old_kernel_pagetable = p->kernel_pagetable;
+  p->kernel_pagetable  = kernel_pagetable;
   p->sz = sz;
   p->trapframe->epc = elf.entry;  // initial program counter = main
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
+  w_satp(MAKE_SATP(p->kernel_pagetable));
+  sfence_vma();
+  freeunmap(old_kernel_pagetable);
 
   if (p->pid == 1)
     vmprint(p->pagetable);
@@ -135,6 +148,8 @@ exec(char *path, char **argv)
  bad:
   if(pagetable)
     proc_freepagetable(pagetable, sz);
+  if (kernel_pagetable)
+    freeunmap(kernel_pagetable);
   if(ip){
     iunlockput(ip);
     end_op();

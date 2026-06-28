@@ -261,6 +261,9 @@ growproc(int n)
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    if (copy_uvm_to_kvm(p->pagetable, p->kernel_pagetable, p->sz, n) != 0) {
+      return -1;
+    }
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
@@ -289,6 +292,13 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
+
+  // Copy user mappings to kernel pagetable copy of child
+  if (copy_uvm_to_kvm(np->pagetable, np->kernel_pagetable, 0, np->sz) != 0) {
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
 
   np->parent = p;
 

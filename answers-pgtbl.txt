@@ -21,3 +21,16 @@
   The other two pages with PTEs near MAXVA (2 pages below 256GB) contain trampoline and trapframe.
     - page 511 (0x3ffffff000) is mapped to trampoline
     - page 510 (0x3fffffe000) is mapped to trapframe
+
+
+[copyin_new]
+  The three conditions for invalid arguments are
+  - srcva >= p->sz
+  - srcva + len >= p->sz
+  - srcva + len < srcva
+
+  The first two conditions are straightforward and immediate that the whole block to be copied must be inside process's memory. Ahead of p->sz, dereferencing gives data from kernel memory.
+  Now, suppose len is a very big uint64 such that the sum (srcva + len) overflows and results in a small number. The overflow would always result in number smaller than both operands.
+  In such a case both trivial conditions satisfy but now memove would keep on copying bytes from srcva to dst at least as long as UINT64_MAX is not hit.
+  Such bug can cause memory exhaustion as dst is now very big string of valid data.
+  The addition of the (srcva + len < srcva) detects this overflow to save from this condition.
