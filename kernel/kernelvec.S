@@ -49,7 +49,7 @@ kernelvec:
 
         // restore registers.
         ld ra, 0(sp)
-        ld sp, 8(sp)
+        ld sp, 8(sp) // this is redundant, sp already is the same as 8(sp), good for symmetry though
         ld gp, 16(sp)
         // not this, in case we moved CPUs: ld tp, 24(sp)
         ld t0, 32(sp)
@@ -95,7 +95,7 @@ timervec:
         # scratch[0,8,16] : register save area.
         # scratch[32] : address of CLINT's MTIMECMP register.
         # scratch[40] : desired interval between interrupts.
-        
+
         csrrw a0, mscratch, a0
         sd a1, 0(a0)
         sd a2, 8(a0)
