@@ -103,4 +103,11 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // alarm support
+  uint64 handler;              // pa to handler function
+  int interval;                // interval between periodic calls
+  int countdown;               // countdown signal for alarm
+  struct trapframe sigret_trap;// trapframe before handler call was set up
+  int in_handler;              // signal to stop handler call when getting timer interrupts in handler
 };

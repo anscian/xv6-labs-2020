@@ -189,7 +189,8 @@ UPROGS += \
 	$U/_call\
 	$U/_call2\
 	$U/_call3\
-	$U/_bttest
+	$U/_bttest\
+	$U/_alarmtest
 endif
 
 ifeq ($(LAB),lazy)
