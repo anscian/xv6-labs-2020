@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -131,7 +133,7 @@ kvmpa(uint64 va)
   uint64 off = va % PGSIZE;
   pte_t *pte;
   uint64 pa;
-  
+
   pte = walk(kernel_pagetable, va, 0);
   if(pte == 0)
     panic("kvmpa");
@@ -181,9 +183,9 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
+      continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
+      continue;
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -225,10 +227,13 @@ uvminit(pagetable_t pagetable, uchar *src, uint sz)
 
 // Allocate PTEs and physical memory to grow process from oldsz to
 // newsz, which need not be page aligned.  Returns new size or 0 on error.
+// pte validation added to aviod remap for gaurd pages while handling page-fault
+// Now supports lazy allocation
 uint64
 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
   char *mem;
+  pte_t *pte;
   uint64 a;
 
   if(newsz < oldsz)
@@ -236,6 +241,9 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 
   oldsz = PGROUNDUP(oldsz);
   for(a = oldsz; a < newsz; a += PGSIZE){
+    pte = walk(pagetable, a, 0);
+    if (pte && (*pte & PTE_V))
+      return 0;
     mem = kalloc();
     if(mem == 0){
       uvmdealloc(pagetable, a, oldsz);
@@ -315,9 +323,9 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+      continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      continue;
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -341,7 +349,7 @@ void
 uvmclear(pagetable_t pagetable, uint64 va)
 {
   pte_t *pte;
-  
+
   pte = walk(pagetable, va, 0);
   if(pte == 0)
     panic("uvmclear");
@@ -359,6 +367,10 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0){
+      if (va0 >= myproc()->sz) return -1;
+      else uvmalloc(pagetable, PGROUNDDOWN(va0), va0 + 1), pa0 = walkaddr(pagetable, va0);
+    }
     if(pa0 == 0)
       return -1;
     n = PGSIZE - (dstva - va0);
@@ -384,6 +396,10 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   while(len > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0){
+      if (va0 >= myproc()->sz) return -1;
+      else uvmalloc(pagetable, PGROUNDDOWN(va0), va0 + 1), pa0 = walkaddr(pagetable, va0);
+    }
     if(pa0 == 0)
       return -1;
     n = PGSIZE - (srcva - va0);
@@ -411,6 +427,10 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   while(got_null == 0 && max > 0){
     va0 = PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0){
+      if (va0 >= myproc()->sz) return -1;
+      else uvmalloc(pagetable, PGROUNDDOWN(va0), va0 + 1), pa0 = walkaddr(pagetable, va0);
+    }
     if(pa0 == 0)
       return -1;
     n = PGSIZE - (srcva - va0);
