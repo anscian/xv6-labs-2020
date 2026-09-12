@@ -5,6 +5,7 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
 
 /*
  * the kernel's page table.
@@ -15,6 +16,9 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+struct spinlock xreflock;
+uint8 _xrefcount[(PHYSTOP - KERNBASE)/PGSIZE];
+#define xrefcount(pa) _xrefcount[(pa - KERNBASE)/PGSIZE]
 /*
  * create a direct-map page table for the kernel.
  */
@@ -131,7 +135,7 @@ kvmpa(uint64 va)
   uint64 off = va % PGSIZE;
   pte_t *pte;
   uint64 pa;
-  
+
   pte = walk(kernel_pagetable, va, 0);
   if(pte == 0)
     panic("kvmpa");
@@ -173,7 +177,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 {
-  uint64 a;
+  uint64 a, pa;
   pte_t *pte;
 
   if((va % PGSIZE) != 0)
@@ -186,12 +190,66 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not mapped");
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
-    if(do_free){
-      uint64 pa = PTE2PA(*pte);
+    pa = PTE2PA(*pte);
+
+    acquire(&xreflock);
+    if(do_free && xrefcount(pa) == 0)
       kfree((void*)pa);
-    }
     *pte = 0;
+    if(xrefcount(pa))
+      xrefcount(pa)--;
+    release(&xreflock);
   }
+}
+
+// Copy on Write implementation
+// called while page-fault occurs for write
+// return 0 on success and -1/-2 on failure
+int
+_cow(pagetable_t pagetable, uint64 va, uint kmode)
+{
+  pte_t *pte;
+  uint64 flags, pa;
+  char *mem;
+
+  if((pte = walk(pagetable, va, 0)) == 0)
+    panic("cow: walk");
+  if((*pte & PTE_V) == 0)
+    panic("cow: not mapped");
+  flags = PTE_FLAGS(*pte);
+  if(flags == PTE_V)
+    panic("cow: not a leaf");
+  if(!(*pte & PTE_RSW1))
+    return -1;
+  else if(!kmode && !(*pte & PTE_RSW2))
+    return -2;
+  pa = PTE2PA(*pte);
+  kmode = *pte & PTE_RSW2;
+
+  acquire(&xreflock);
+  if(xrefcount(pa)){
+    if((mem = kalloc()) == 0){
+      release(&xreflock);
+      return -1;
+    }
+    memmove(mem, (char *)pa, PGSIZE);
+    *pte = PA2PTE(mem) | flags;
+    if(xrefcount((uint64)mem))
+      panic("cow: multiple refs for fresh page");
+    xrefcount(pa)--;
+  }
+  release(&xreflock);
+
+  if(kmode)
+    *pte |= PTE_W;
+  *pte &= ~(PTE_RSW1|PTE_RSW2);
+
+  return 0;
+}
+int
+cow(pagetable_t pagetable, uint64 va)
+{
+  return _cow(pagetable, va, 0);
 }
 
 // create an empty user page table.
@@ -215,6 +273,7 @@ uvminit(pagetable_t pagetable, uchar *src, uint sz)
 {
   char *mem;
 
+  initlock(&xreflock, "xrefs");
   if(sz >= PGSIZE)
     panic("inituvm: more than a page");
   mem = kalloc();
@@ -311,27 +370,29 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    if(!(*pte & PTE_RSW1) && (*pte & PTE_W))
+      *pte |= PTE_RSW2;
+    *pte &= ~PTE_W;
+    *pte |= PTE_RSW1;
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
+    if(mappages(new, i, PGSIZE, pa, flags) != 0)
       goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
-    }
+
+    acquire(&xreflock);
+    xrefcount(pa)++;
+    release(&xreflock);
   }
   return 0;
 
  err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
+  uvmunmap(new, 0, i / PGSIZE, 0);
   return -1;
 }
 
@@ -341,7 +402,7 @@ void
 uvmclear(pagetable_t pagetable, uint64 va)
 {
   pte_t *pte;
-  
+
   pte = walk(pagetable, va, 0);
   if(pte == 0)
     panic("uvmclear");
@@ -361,6 +422,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+    _cow(pagetable, va0, 1);
+    pa0 = walkaddr(pagetable, va0);
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
