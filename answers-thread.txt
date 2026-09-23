@@ -1,0 +1,20 @@
+More than one threads lead to race condition when performing puts. For instance, 2 threads can lead to lost keys because of race condition as follows:
+  Let each of the two threads put keys each belonging to same bucket at the same time. This leads to insert() call for (key, value) pair on the same bucket of table. Now, table[i] is head of linked list for that bucket.
+
+  Here is the insert function
+    static void
+    insert(int key, int value, struct entry **p, struct entry *n)
+    {
+    alloc:
+      struct entry *e = malloc(sizeof(struct entry));
+      e->key = key;
+      e->value = value;
+    l1:  e->next = n;
+    l2:  *p = e;
+    }
+  Example Order of execution
+    Thread 1: alloc     - l1  - l2  -
+    Thread 2:     - alloc  - l1  - l2
+
+  Both struct entry gets prepared e1 (from thread 1) and e2 (from thread 2) and let table[i] be the original head e. After both threads have completed l1, (e1->next == e) and (e2->next == e). When thread 1 completes l2, table[i] gets updated to e1 (LL: e1->e). And immediately after thread 2 executes l2, table[i] gets updated to e2 (LL: e2->e). The entry e1 is lost.
+  There is a need to enforce each thread executing to perform insert calls atomically.

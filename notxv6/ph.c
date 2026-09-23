@@ -14,6 +14,7 @@ struct entry {
   struct entry *next;
 };
 struct entry *table[NBUCKET];
+pthread_mutex_t bucket_put_locks[NBUCKET];
 int keys[NKEYS];
 int nthread = 1;
 
@@ -25,17 +26,19 @@ now()
  return tv.tv_sec + tv.tv_usec / 1000000.0;
 }
 
-static void 
-insert(int key, int value, struct entry **p, struct entry *n)
+static void
+insert(int key, int value, struct entry **p, int b)
 {
   struct entry *e = malloc(sizeof(struct entry));
   e->key = key;
   e->value = value;
-  e->next = n;
+  pthread_mutex_lock(bucket_put_locks + b);
+  e->next = *p;
   *p = e;
+  pthread_mutex_unlock(bucket_put_locks + b);
 }
 
-static 
+static
 void put(int key, int value)
 {
   int i = key % NBUCKET;
@@ -51,7 +54,7 @@ void put(int key, int value)
     e->value = value;
   } else {
     // the new is new.
-    insert(key, value, &table[i], table[i]);
+    insert(key, value, &table[i], i);
   }
 }
 
@@ -114,6 +117,9 @@ main(int argc, char *argv[])
   for (int i = 0; i < NKEYS; i++) {
     keys[i] = random();
   }
+
+  for(int i = 0; i < NBUCKET; i++)
+    pthread_mutex_init(bucket_put_locks + i, NULL);
 
   //
   // first the puts
