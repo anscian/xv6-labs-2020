@@ -249,6 +249,8 @@ _cow(pagetable_t pagetable, uint64 va, uint kmode)
 int
 cow(pagetable_t pagetable, uint64 va)
 {
+  if(va >= MAXVA)
+    return -1;
   return _cow(pagetable, va, 0);
 }
 
