@@ -24,7 +24,7 @@
 #define min(a, b) ((a) < (b) ? (a) : (b))
 // there should be one superblock per disk device, but we run with
 // only one device
-struct superblock sb; 
+struct superblock sb;
 
 // Read the super block.
 static void
@@ -180,7 +180,7 @@ void
 iinit()
 {
   int i = 0;
-  
+
   initlock(&icache.lock, "icache");
   for(i = 0; i < NINODE; i++) {
     initsleeplock(&icache.inode[i].lock, "inode");
@@ -505,13 +505,24 @@ writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
     brelse(bp);
   }
 
-  if(off > ip->size)
+  if(off > ip->size){
     ip->size = off;
 
-  // write the i-node back to disk even if the size didn't change
-  // because the loop above might have called bmap() and added a new
-  // block to ip->addrs[].
-  iupdate(ip);
+    // write the i-node back to disk even if the size didn't change
+    // because the loop above might have called bmap() and added a new
+    // block to ip->addrs[].
+    // unless, this will never happen. Reason is that an inode would be modified
+    // using writei() only in outer layers of fs (other than itrunc()).
+    // Theorem: none of the blocks that should hold 0 to ip->size bytes are free
+    // Assumption: writei() and itrunc() are only operations to modify inode
+    // Proof: for itrunc() its easy, 0 to ip->size covers no block and none is free
+    // for writei, the check off > ip->size ensures that we have no writes
+    // starting ahead of end of file. An empty file follows the rule.
+    // The area that's going to be written from off to off + n follows the rule
+    // Thus we can't have a file with few blocks between 0 to ip->size as free
+    // Implication: If after write, ip->size doesn't grow, iupdate() is not needed
+    iupdate(ip);
+  }
 
   return tot;
 }
